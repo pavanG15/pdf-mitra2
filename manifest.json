@@ -1,0 +1,17 @@
+
+{
+  "short_name": "PDFMitra",
+  "name": "PDF MITRA - Pro PDF Suite",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/337/337946.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#020617"
+}

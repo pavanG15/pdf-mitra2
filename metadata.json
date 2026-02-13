@@ -1,0 +1,7 @@
+{
+  "name": "PDF MITRA - Pro PDF Suite",
+  "description": "A high-performance, privacy-first PDF management suite. Merge, split, compress, scan and convert PDFs entirely in your browser with professional tools.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

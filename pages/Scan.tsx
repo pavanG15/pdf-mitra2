@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { ProcessingState } from '../types';
 
@@ -15,6 +14,7 @@ const Scan: React.FC = () => {
   const [isScannerReady, setIsScannerReady] = useState(false);
   const scanner = useRef<any>(null);
 
+  // Initialize Scanner
   useEffect(() => {
     let checkInterval: any;
     const initScanner = () => {
@@ -37,16 +37,21 @@ const Scan: React.FC = () => {
     };
   }, []);
 
+  // NEW: Handle attaching the stream to the video element once it renders
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(e => console.error("Playback failed:", e));
+    }
+  }, [stream]);
+
   const startCamera = async () => {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({ 
         video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
       });
+      // Just set the stream state. The new useEffect will handle the videoRef attachment.
       setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        videoRef.current.play();
-      }
       setState({ status: 'processing', progress: 0, message: 'Camera active' });
     } catch (err) {
       console.error(err);
@@ -66,13 +71,16 @@ const Scan: React.FC = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
     ctx.drawImage(videoRef.current, 0, 0);
+    
     try {
       const resultCanvas = scanner.current.extractPaper(canvas, 1200, 1697);
       setCapturedImages(prev => [...prev, resultCanvas.toDataURL('image/jpeg', 0.9)]);
     } catch (e) {
+      // Fallback if extraction fails
       setCapturedImages(prev => [...prev, canvas.toDataURL('image/jpeg', 0.9)]);
     }
   };
@@ -116,7 +124,7 @@ const Scan: React.FC = () => {
           <button 
             onClick={startCamera} 
             disabled={!isScannerReady}
-            className="bg-teal-600 text-white px-12 py-5 rounded-2xl font-black text-xl shadow-xl shadow-teal-500/20 active:scale-95 transition-all"
+            className="bg-teal-600 text-white px-12 py-5 rounded-2xl font-black text-xl shadow-xl shadow-teal-500/20 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Start Scanning
           </button>
@@ -130,7 +138,7 @@ const Scan: React.FC = () => {
           <div className="absolute inset-0 border-[40px] border-black/20 pointer-events-none">
              <div className="w-full h-full border-2 border-dashed border-white/50 rounded-2xl"></div>
           </div>
-          <div className="absolute bottom-10 left-0 right-0 flex justify-center items-center gap-6">
+          <div className="absolute bottom-10 left-0 right-0 flex justify-center items-center gap-6 z-10">
             <button onClick={captureFrame} className="w-20 h-20 bg-white rounded-full flex items-center justify-center text-teal-600 text-2xl shadow-2xl border-4 border-teal-500/20 active:scale-90 transition-all">
               <i className="fas fa-camera"></i>
             </button>
@@ -150,7 +158,7 @@ const Scan: React.FC = () => {
         <div className="mt-12 flex gap-4 overflow-x-auto pb-4 no-scrollbar px-4">
             {capturedImages.map((img, i) => (
               <div key={i} className="flex-shrink-0 w-24 aspect-[3/4] rounded-xl border-4 border-white dark:border-slate-800 overflow-hidden shadow-lg relative group">
-                <img src={img} className="w-full h-full object-cover" />
+                <img src={img} className="w-full h-full object-cover" alt={`Scanned page ${i + 1}`} />
                 <button 
                   onClick={() => setCapturedImages(prev => prev.filter((_, idx) => idx !== i))}
                   className="absolute inset-0 bg-rose-500/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"

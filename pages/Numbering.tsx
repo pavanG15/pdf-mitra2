@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import Dropzone from '../components/Dropzone';
-import PDFPreview from '../components/PDFPreview';
+import PDFPreview from '../components/MyPDFPreview';
 import { ProcessingState } from '../types';
 
 const Numbering: React.FC = () => {

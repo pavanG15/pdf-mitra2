@@ -28,9 +28,11 @@ import Legal from './pages/Legal';
 interface HeaderProps {
   isDark: boolean;
   toggleTheme: () => void;
+  isHidden?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
+const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme, isHidden }) => {
+  if (isHidden) return null;
   return (
     <nav className="sticky top-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-900 transition-all duration-300">
       <div className="max-w-5xl mx-auto px-4">
@@ -72,9 +74,10 @@ const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
   );
 };
 
-const MobileNav: React.FC = () => {
+const MobileNav: React.FC<{ isHidden?: boolean }> = ({ isHidden }) => {
   const location = useLocation();
   const path = location.pathname;
+  if (isHidden) return null;
 
   const navItems = [
     { icon: 'fa-house', label: 'Home', path: '/' },
@@ -112,6 +115,59 @@ const MobileNav: React.FC = () => {
   );
 };
 
+function AppContent({ isDark, toggleTheme }: { isDark: boolean; toggleTheme: () => void }) {
+  const location = useLocation();
+  // Hide global navigation if on scanner page (it has its own immersive UI)
+  const isScannerActive = location.pathname === '/scan';
+
+  return (
+    <div className={`min-h-screen flex flex-col transition-colors duration-300 ${isDark ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+      <Header isDark={isDark} toggleTheme={toggleTheme} isHidden={isScannerActive} />
+      <main className={`flex-grow ${isScannerActive ? '' : 'pb-32 md:pb-0'}`}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/merge" element={<Merge />} />
+          <Route path="/split" element={<Split />} />
+          <Route path="/extract-pages" element={<ExtractPages />} />
+          <Route path="/delete-pages" element={<DeletePages />} />
+          <Route path="/crop" element={<CropPDF />} />
+          <Route path="/compress" element={<Compress />} />
+          <Route path="/pdf-to-word" element={<PDFtoWord />} />
+          <Route path="/word-to-pdf" element={<WordToPDF />} />
+          <Route path="/pdf-to-jpg" element={<PDFtoJPG />} />
+          <Route path="/jpg-to-pdf" element={<JPGtoPDF />} />
+          <Route path="/rotate" element={<Rotate />} />
+          <Route path="/reorder" element={<Reorder />} />
+          <Route path="/scan" element={<Scan />} />
+          <Route path="/protect" element={<Protect />} />
+          <Route path="/unlock" element={<Unlock />} />
+          <Route path="/watermark" element={<Watermark />} />
+          <Route path="/repair" element={<Repair />} />
+          <Route path="/numbering" element={<Numbering />} />
+          <Route path="/blog" element={<Blog />} />
+          <Route path="/blog/:id" element={<BlogPost />} />
+          <Route path="/id-merge" element={<IDCardMerge />} />
+          <Route path="/legal" element={<Legal />} />
+          <Route path="*" element={<Home />} />
+        </Routes>
+      </main>
+      <footer className={`bg-white dark:bg-slate-950 border-t border-slate-100 dark:border-slate-900 py-12 px-6 hidden md:${isScannerActive ? 'hidden' : 'block'}`}>
+        <div className="max-w-5xl mx-auto flex flex-col items-center gap-6">
+          <div className="flex gap-6 text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">
+            <Link to="/legal" className="hover:text-teal-600 transition-colors">Privacy Policy</Link>
+            <Link to="/legal" className="hover:text-teal-600 transition-colors">Terms of Service</Link>
+            <Link to="/blog" className="hover:text-teal-600 transition-colors">Blog</Link>
+          </div>
+          <div className="text-[11px] font-black tracking-widest text-slate-300 dark:text-slate-800 uppercase">
+            © 2026 PDFMITRA PRO SUITE • BUILT FOR PRIVACY
+          </div>
+        </div>
+      </footer>
+      <MobileNav isHidden={isScannerActive} />
+    </div>
+  );
+}
+
 export default function App() {
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark');
 
@@ -129,50 +185,7 @@ export default function App() {
 
   return (
     <Router>
-      <div className={`min-h-screen flex flex-col transition-colors duration-300 ${isDark ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-        <Header isDark={isDark} toggleTheme={toggleTheme} />
-        <main className="flex-grow pb-32 md:pb-0">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/merge" element={<Merge />} />
-            <Route path="/split" element={<Split />} />
-            <Route path="/extract-pages" element={<ExtractPages />} />
-            <Route path="/delete-pages" element={<DeletePages />} />
-            <Route path="/crop" element={<CropPDF />} />
-            <Route path="/compress" element={<Compress />} />
-            <Route path="/pdf-to-word" element={<PDFtoWord />} />
-            <Route path="/word-to-pdf" element={<WordToPDF />} />
-            <Route path="/pdf-to-jpg" element={<PDFtoJPG />} />
-            <Route path="/jpg-to-pdf" element={<JPGtoPDF />} />
-            <Route path="/rotate" element={<Rotate />} />
-            <Route path="/reorder" element={<Reorder />} />
-            <Route path="/scan" element={<Scan />} />
-            <Route path="/protect" element={<Protect />} />
-            <Route path="/unlock" element={<Unlock />} />
-            <Route path="/watermark" element={<Watermark />} />
-            <Route path="/repair" element={<Repair />} />
-            <Route path="/numbering" element={<Numbering />} />
-            <Route path="/blog" element={<Blog />} />
-            <Route path="/blog/:id" element={<BlogPost />} />
-            <Route path="/id-merge" element={<IDCardMerge />} />
-            <Route path="/legal" element={<Legal />} />
-            <Route path="*" element={<Home />} />
-          </Routes>
-        </main>
-        <footer className="bg-white dark:bg-slate-950 border-t border-slate-100 dark:border-slate-900 py-12 px-6 hidden md:block">
-          <div className="max-w-5xl mx-auto flex flex-col items-center gap-6">
-            <div className="flex gap-6 text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">
-              <Link to="/legal" className="hover:text-teal-600 transition-colors">Privacy Policy</Link>
-              <Link to="/legal" className="hover:text-teal-600 transition-colors">Terms of Service</Link>
-              <Link to="/blog" className="hover:text-teal-600 transition-colors">Blog</Link>
-            </div>
-            <div className="text-[11px] font-black tracking-widest text-slate-300 dark:text-slate-800 uppercase">
-              © 2026 PDFMITRA PRO SUITE • BUILT FOR PRIVACY
-            </div>
-          </div>
-        </footer>
-        <MobileNav />
-      </div>
+      <AppContent isDark={isDark} toggleTheme={toggleTheme} />
     </Router>
   );
 }

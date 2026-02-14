@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import Dropzone from '../components/Dropzone';
+import PDFPreview from '../components/MyPDFPreview';
 import { ProcessingState } from '../types';
 
 declare const jspdf: any;

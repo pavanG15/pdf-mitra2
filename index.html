@@ -55,6 +55,10 @@
             animation: spin 0.8s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Custom scrollbar for gallery */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 
 <script type="importmap">
@@ -76,11 +80,14 @@
     
     <div id="root"></div>
 
-    <!-- Core Libraries loaded non-blockingly -->
+    <!-- Core Libraries -->
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    
+    <!-- Advanced Scanning Libraries -->
+    <script src="https://cdn.jsdelivr.net/gh/colonelparrot/jscanify@master/src/jscanify.min.js"></script>
 
     <!-- Main Entry Point -->
     <script type="module" src="index.tsx"></script>

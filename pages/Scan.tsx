@@ -5,6 +5,7 @@ import { ProcessingState } from '../types';
 // Access external libraries from the window object
 declare const jspdf: any;
 declare const jscanify: any;
+declare const JSZip: any;
 
 type ScanFilter = 'none' | 'document' | 'magic_color' | 'bw' | 'grayscale';
 type ScanMode = 'document' | 'idcard' | 'book' | 'photo';
@@ -19,46 +20,46 @@ interface CapturedPage {
   processed: string;
   filter: ScanFilter;
   id: string;
+  name: string;
+  date: string;
 }
 
 const Scan: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cropCanvasRef = useRef<HTMLCanvasElement>(null);
-  const scannerRef = useRef<any>(null); // for jscanify instance
+  const scannerRef = useRef<any>(null); 
   
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedPages, setCapturedPages] = useState<CapturedPage[]>([]);
   
-  // UI Steps: 'camera' | 'crop' | 'edit' | 'gallery' | 'idle'
-  const [uiStep, setUiStep] = useState<'camera' | 'crop' | 'edit' | 'gallery' | 'idle'>('idle');
+  // UI Steps: 'camera' | 'crop' | 'edit' | 'gallery' | 'preview' | 'idle'
+  const [uiStep, setUiStep] = useState<'camera' | 'crop' | 'edit' | 'gallery' | 'preview' | 'idle'>('idle');
   
   const [currentCapture, setCurrentCapture] = useState<string | null>(null);
+  const [previewPage, setPreviewPage] = useState<CapturedPage | null>(null);
   const [currentFilter, setCurrentFilter] = useState<ScanFilter>('bw');
   const [currentMode, setCurrentMode] = useState<ScanMode>('document');
   const [isFlashOn, setIsFlashOn] = useState(false);
   const [isAutoMode, setIsAutoMode] = useState(true);
   
-  const [fileName, setFileName] = useState(`Scan_${new Date().toLocaleDateString().replace(/\//g, '-')}`);
-  const [isRenaming, setIsRenaming] = useState(false);
+  const [folderName, setFolderName] = useState("Gorakh_kachru_khope");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [exportFormat, setExportFormat] = useState<'PDF' | 'JPG'>('PDF');
-  const [compressionQuality, setCompressionQuality] = useState(80);
+  
+  // Share Modal Toggles
+  const [enablePassword, setEnablePassword] = useState(false);
+  const [enableOCR, setEnableOCR] = useState(true);
+  const [saveSeparately, setSaveSeparately] = useState(false); // New: Save separate files
   const [pageSize, setPageSize] = useState<'A4' | 'Auto'>('A4');
+
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Cropping State
-  const [cropPoints, setCropPoints] = useState<Point[]>([
-    { x: 10, y: 10 }, { x: 90, y: 10 },
-    { x: 90, y: 90 }, { x: 10, y: 90 }
-  ]);
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
-  const cropContainerRef = useRef<HTMLDivElement>(null);
-
+  // Processing State
   const [state, setState] = useState<ProcessingState>({ status: 'idle', progress: 0 });
 
-  // Initialize jscanify
   useEffect(() => {
     if (typeof jscanify !== 'undefined') {
       scannerRef.current = new jscanify();
@@ -69,11 +70,7 @@ const Scan: React.FC = () => {
     try {
       setState({ status: 'loading', progress: 0 });
       const constraints = {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false
       };
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -81,42 +78,10 @@ const Scan: React.FC = () => {
       setUiStep('camera');
       setState({ status: 'idle', progress: 0 });
     } catch (err) {
-      console.error("Camera error:", err);
-      alert("Unable to access camera. Please ensure permissions are granted.");
+      alert("Unable to access camera.");
       setUiStep('idle');
-      setState({ status: 'idle', progress: 0 });
     }
   };
-
-  const toggleFlash = async () => {
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    const capabilities = (track as any).getCapabilities?.() || {};
-    
-    if (capabilities.torch) {
-      try {
-        const nextFlash = !isFlashOn;
-        await (track as any).applyConstraints({
-          advanced: [{ torch: nextFlash }]
-        });
-        setIsFlashOn(nextFlash);
-      } catch (err) {
-        console.error("Flash error:", err);
-      }
-    } else {
-      alert("Flashlight is not available on this camera.");
-    }
-  };
-
-  useEffect(() => {
-    if (uiStep === 'camera' && stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-      const playPromise = videoRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(error => console.error("Video play failed:", error));
-      }
-    }
-  }, [uiStep, stream]);
 
   const stopCamera = () => {
     if (stream) {
@@ -124,26 +89,17 @@ const Scan: React.FC = () => {
       setStream(null);
     }
     setUiStep('idle');
-    setIsFlashOn(false);
   };
 
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const video = videoRef.current;
-    
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
     ctx.drawImage(video, 0, 0);
-
-    // Visual feedback (flash effect)
-    const flashOverlay = document.createElement('div');
-    flashOverlay.className = 'fixed inset-0 bg-white z-[99999] animate-pulse pointer-events-none';
-    document.body.appendChild(flashOverlay);
-    setTimeout(() => flashOverlay.remove(), 100);
 
     const rawData = canvas.toDataURL('image/jpeg', 0.95);
     setCurrentCapture(rawData);
@@ -151,159 +107,32 @@ const Scan: React.FC = () => {
     if (isAutoMode) {
       processAutoImage(rawData);
     } else {
-      setCropPoints([{ x: 10, y: 10 }, { x: 90, y: 10 }, { x: 90, y: 90 }, { x: 10, y: 90 }]);
       setUiStep('crop');
     }
   };
 
   const processAutoImage = (imageSrc: string) => {
-    setState({ status: 'processing', progress: 50, message: 'Enhancing Document...' });
-    
+    setState({ status: 'processing', progress: 50, message: 'Detecting Edges...' });
     const img = new Image();
     img.src = imageSrc;
     img.onload = () => {
       if (!canvasRef.current || !scannerRef.current) return;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
-
-      // Use jscanify to extract paper if detected, otherwise fallback to standard
-      let finalCanvas = canvas;
+      let finalCanvas = canvasRef.current;
       try {
-        const resultCanvas = scannerRef.current.extractPaper(img, img.width, img.height);
-        finalCanvas = resultCanvas;
-      } catch (e) {
-        console.warn("Auto-extraction failed, using original size", e);
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-      }
+        finalCanvas = scannerRef.current.extractPaper(img, img.width, img.height);
+      } catch (e) { console.warn(e); }
 
-      const finalCtx = finalCanvas.getContext('2d', { willReadFrequently: true });
-      if (finalCtx) {
-        const imageData = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
-        const data = imageData.data;
-        
-        // Professional B&W Filter with dynamic thresholding
-        for (let i = 0; i < data.length; i += 4) {
-          const avg = (data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
-          const val = avg > 115 ? 255 : Math.max(0, avg - 30); // Preserve some contrast
-          data[i] = data[i+1] = data[i+2] = val > 160 ? 255 : val;
-        }
-        finalCtx.putImageData(imageData, 0, 0);
-      }
-      
       const processedData = finalCanvas.toDataURL('image/jpeg', 0.85);
-      
-      setCapturedPages(prev => [...prev, { 
+      const newPage: CapturedPage = { 
         original: imageSrc, 
         processed: processedData, 
         filter: 'bw',
-        id: Math.random().toString(36).substr(2, 9)
-      }]);
-      
-      setCurrentCapture(null);
+        id: Math.random().toString(36).substr(2, 9),
+        name: `Document ${capturedPages.length + 1}`,
+        date: new Date().toLocaleDateString('en-GB')
+      };
+      setCapturedPages(prev => [...prev, newPage]);
       setState({ status: 'idle', progress: 0 });
-      
-      const toast = document.createElement('div');
-      toast.className = 'fixed bottom-40 left-1/2 -translate-x-1/2 bg-teal-500 text-black font-black text-[10px] uppercase px-6 py-3 rounded-full z-[100000] shadow-2xl animate-in slide-in-from-bottom duration-300';
-      toast.innerText = 'DOCUMENT CAPTURED';
-      document.body.appendChild(toast);
-      setTimeout(() => {
-        toast.classList.add('animate-out', 'fade-out');
-        setTimeout(() => toast.remove(), 300);
-      }, 1500);
-    };
-  };
-
-  const handlePointMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    if (draggingIdx === null || !cropContainerRef.current) return;
-    const rect = cropContainerRef.current.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-    
-    const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
-    const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
-    
-    const newPoints = [...cropPoints];
-    newPoints[draggingIdx] = { x, y };
-    setCropPoints(newPoints);
-  }, [draggingIdx, cropPoints]);
-
-  const applyCrop = () => {
-    if (!currentCapture || !cropCanvasRef.current) return;
-    const canvas = cropCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    const img = new Image();
-    img.src = currentCapture;
-    img.onload = () => {
-      // Perspective crop would be ideal here with OpenCV, but we use a bounding box fallback
-      const minX = Math.min(...cropPoints.map(p => p.x)) * img.width / 100;
-      const maxX = Math.max(...cropPoints.map(p => p.x)) * img.width / 100;
-      const minY = Math.min(...cropPoints.map(p => p.y)) * img.height / 100;
-      const maxY = Math.max(...cropPoints.map(p => p.y)) * img.height / 100;
-      
-      const cropWidth = maxX - minX;
-      const cropHeight = maxY - minY;
-      
-      canvas.width = cropWidth;
-      canvas.height = cropHeight;
-      ctx.drawImage(img, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-      
-      setCurrentCapture(canvas.toDataURL('image/jpeg', 0.95));
-      setUiStep('edit');
-    };
-  };
-
-  const acceptEnhancedPage = () => {
-    if (!currentCapture || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
-    const img = new Image();
-    img.src = currentCapture;
-    img.onload = () => {
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-      
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      
-      if (currentFilter === 'document') {
-        for (let i = 0; i < data.length; i += 4) {
-          let gray = 0.2126 * data[i] + 0.7152 * data[i+1] + 0.0722 * data[i+2];
-          let val = (gray - 110) * 2.5 + 128;
-          val = Math.max(0, Math.min(255, val > 200 ? 255 : val < 60 ? val * 0.5 : val));
-          data[i] = data[i+1] = data[i+2] = val;
-        }
-      } else if (currentFilter === 'bw') {
-        for (let i = 0; i < data.length; i += 4) {
-          const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-          const val = avg > 115 ? 255 : 0;
-          data[i] = data[i+1] = data[i+2] = val;
-        }
-      } else if (currentFilter === 'grayscale') {
-        for (let i = 0; i < data.length; i += 4) {
-          const g = 0.3 * data[i] + 0.59 * data[i + 1] + 0.11 * data[i + 2];
-          data[i] = data[i+1] = data[i+2] = g;
-        }
-      }
-      
-      ctx.putImageData(imageData, 0, 0);
-      const processedData = canvas.toDataURL('image/jpeg', compressionQuality / 100);
-      
-      setCapturedPages(prev => [...prev, { 
-        original: currentCapture, 
-        processed: processedData, 
-        filter: currentFilter,
-        id: Math.random().toString(36).substr(2, 9)
-      }]);
-      setCurrentCapture(null);
-      setUiStep('camera');
     };
   };
 
@@ -322,362 +151,337 @@ const Scan: React.FC = () => {
     setIsSelectMode(false);
   };
 
-  const performExport = () => {
-    if (capturedPages.length === 0) return;
-    setState({ status: 'processing', progress: 50, message: `Building your ${exportFormat}...` });
-    setShowShareModal(false);
+  const updateDocName = (id: string, newName: string) => {
+    setCapturedPages(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
+    setEditingId(null);
+  };
+
+  const handleExport = async () => {
+    const targets = isSelectMode 
+      ? capturedPages.filter(p => selectedIds.has(p.id))
+      : capturedPages;
+
+    if (targets.length === 0) return;
     
-    setTimeout(() => {
-      try {
-        // Fix: Use the correct UMD access for jsPDF
-        const jsPDFLib = (window as any).jspdf?.jsPDF || (window as any).jsPDF;
-        if (!jsPDFLib) throw new Error("jsPDF library not found");
+    setState({ status: 'processing', progress: 10, message: 'Preparing Export...' });
 
-        if (exportFormat === 'PDF') {
-          const doc = new jsPDFLib('p', 'mm', pageSize === 'A4' ? 'a4' : [210, 297]);
-          const pw = 210, ph = 297;
-
-          capturedPages.forEach((page, idx) => {
-            if (idx > 0) doc.addPage();
-            doc.addImage(page.processed, 'JPEG', 0, 0, pw, ph, undefined, 'FAST');
-          });
-
-          const blob = doc.output('blob');
-          setState({ 
-            status: 'success', 
-            resultUrl: URL.createObjectURL(blob), 
-            resultFileName: `${fileName}.pdf`,
-            progress: 100 
-          });
-        } else {
-          // Export JPG (first or selected page)
-          setState({ 
-            status: 'success', 
-            resultUrl: capturedPages[0].processed, 
-            resultFileName: `${fileName}.jpg`,
-            progress: 100 
-          });
+    try {
+      const { jsPDF } = (window as any).jspdf;
+      
+      if (saveSeparately) {
+        // ZIP individual files
+        setState({ status: 'processing', progress: 30, message: 'Creating Separate Files...' });
+        const zip = new JSZip();
+        
+        for (let i = 0; i < targets.length; i++) {
+          const page = targets[i];
+          const doc = new jsPDF('p', 'mm', 'a4');
+          doc.addImage(page.processed, 'JPEG', 0, 0, 210, 297);
+          const pdfBlob = doc.output('blob');
+          zip.file(`${page.name}.pdf`, pdfBlob);
+          setState({ status: 'processing', progress: 30 + Math.round((i/targets.length)*60), message: `Zipping ${page.name}...` });
         }
-        stopCamera();
-      } catch (e) {
-        console.error("Export error:", e);
-        setState({ status: 'error', progress: 0, message: 'Export failed. Try again.' });
+        
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        setState({ 
+          status: 'success', 
+          resultUrl: URL.createObjectURL(zipBlob), 
+          resultFileName: `${folderName}_separated.zip`,
+          progress: 100 
+        });
+      } else {
+        // Merged PDF
+        const doc = new jsPDF('p', 'mm', 'a4');
+        for (let i = 0; i < targets.length; i++) {
+          if (i > 0) doc.addPage();
+          doc.addImage(targets[i].processed, 'JPEG', 0, 0, 210, 297);
+          setState({ status: 'processing', progress: Math.round((i/targets.length)*90), message: `Merging Page ${i+1}...` });
+        }
+        const blob = doc.output('blob');
+        setState({ 
+          status: 'success', 
+          resultUrl: URL.createObjectURL(blob), 
+          resultFileName: `${folderName}.pdf`,
+          progress: 100 
+        });
       }
-    }, 150);
+      setShowShareModal(false);
+    } catch (e) {
+      console.error(e);
+      setState({ status: 'error', progress: 0, message: 'Export failed.' });
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-white dark:bg-slate-950 flex flex-col overflow-hidden h-screen w-screen select-none">
+    <div className="fixed inset-0 z-[9999] bg-[#f8fafc] dark:bg-slate-950 flex flex-col overflow-hidden h-screen w-screen select-none font-sans">
       <canvas ref={canvasRef} className="hidden"></canvas>
       <canvas ref={cropCanvasRef} className="hidden"></canvas>
 
-      {/* Camera UI Step */}
-      {uiStep === 'camera' && (
-        <div className="flex-1 flex flex-col h-full bg-black relative animate-in fade-in duration-300">
-          <div className="absolute top-0 left-0 right-0 px-4 pt-6 pb-12 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent z-20">
-            <button 
-              onClick={stopCamera} 
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-md active:scale-90 transition-transform"
-            >
-              <i className="fas fa-times text-white"></i>
-            </button>
-            
-            <div className="flex bg-white/5 backdrop-blur-xl p-1 rounded-2xl border border-white/10">
-               <button 
-                onClick={() => setIsAutoMode(true)} 
-                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isAutoMode ? 'bg-teal-500 text-black shadow-lg' : 'text-slate-400'}`}
-               >
-                 Auto
-               </button>
-               <button 
-                onClick={() => setIsAutoMode(false)} 
-                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${!isAutoMode ? 'bg-teal-500 text-black shadow-lg' : 'text-slate-400'}`}
-               >
-                 Manual
-               </button>
-            </div>
-
-            <button 
-              onClick={toggleFlash} 
-              className={`w-10 h-10 flex items-center justify-center rounded-full backdrop-blur-md active:scale-90 transition-all ${isFlashOn ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/50' : 'bg-white/10 text-white'}`}
-            >
-              <i className={`fas ${isFlashOn ? 'fa-bolt' : 'fa-bolt-slash'}`}></i>
-            </button>
-          </div>
-
-          <div className="flex-1 relative flex items-center justify-center overflow-hidden">
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              playsInline 
-              muted 
-              className="w-full h-full object-cover"
-            ></video>
-            
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-10">
-              <div className="w-full h-full border-2 border-dashed border-teal-500/20 rounded-[2.5rem] relative">
-                  <div className="absolute top-[-4px] left-[-4px] w-14 h-14 border-t-[6px] border-l-[6px] border-teal-500 rounded-tl-[2rem] shadow-[0_0_20px_rgba(20,184,166,0.3)]"></div>
-                  <div className="absolute top-[-4px] right-[-4px] w-14 h-14 border-t-[6px] border-r-[6px] border-teal-500 rounded-tr-[2rem] shadow-[0_0_20px_rgba(20,184,166,0.3)]"></div>
-                  <div className="absolute bottom-[-4px] left-[-4px] w-14 h-14 border-b-[6px] border-l-[6px] border-teal-500 rounded-bl-[2rem] shadow-[0_0_20px_rgba(20,184,166,0.3)]"></div>
-                  <div className="absolute bottom-[-4px] right-[-4px] w-14 h-14 border-b-[6px] border-r-[6px] border-teal-500 rounded-br-[2rem] shadow-[0_0_20px_rgba(20,184,166,0.3)]"></div>
-                  
-                  {isAutoMode && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                       <div className="w-[80%] h-0.5 bg-teal-500/30 animate-[scan_3s_ease-in-out_infinite] blur-sm"></div>
-                    </div>
-                  )}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-black/95 px-6 pt-4 pb-14 flex flex-col gap-6 z-20 border-t border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-            <div className="flex gap-4 overflow-x-auto no-scrollbar py-1">
-               {['DOCUMENT', 'ID CARD', 'BOOK', 'PHOTO'].map(m => (
-                 <button 
-                  key={m} 
-                  className={`text-[9px] font-black tracking-widest uppercase whitespace-nowrap px-6 py-2.5 rounded-full border transition-all ${m.toLowerCase().replace(' ','') === currentMode ? 'bg-teal-500 text-black border-teal-500 shadow-xl' : 'text-slate-500 border-white/5 bg-white/5'}`} 
-                  onClick={() => setCurrentMode(m.toLowerCase().replace(' ','') as any)}
-                 >
-                   {m}
+      {/* TOP NAVIGATION (Screenshot 8/9 Style) */}
+      {(uiStep === 'gallery' || uiStep === 'preview') && (
+        <div className="bg-white dark:bg-slate-900 pt-10 pb-4 px-4 border-b border-slate-200 dark:border-slate-800 shadow-sm z-50">
+           <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                 <button onClick={() => uiStep === 'preview' ? setUiStep('gallery') : stopCamera()} className="text-slate-600 dark:text-slate-400 text-xl active:scale-90 transition-transform">
+                   <i className="fas fa-arrow-left"></i>
                  </button>
-               ))}
-            </div>
-            <div className="flex items-center justify-between max-w-sm mx-auto w-full px-4">
-               <button 
-                onClick={() => capturedPages.length > 0 && setUiStep('gallery')} 
-                className="w-16 h-16 rounded-2xl border-2 border-white/10 overflow-hidden bg-white/5 flex items-center justify-center active:scale-90 transition-transform shadow-inner"
-               >
-                 {capturedPages.length > 0 ? (
-                   <img src={capturedPages[capturedPages.length-1].processed} className="w-full h-full object-cover scale-110" />
-                 ) : (
-                   <div className="text-white/20 text-2xl"><i className="fas fa-images"></i></div>
-                 )}
-               </button>
-               
-               <button 
-                onClick={capturePhoto} 
-                className="w-24 h-24 rounded-full border-[6px] border-white/10 p-1.5 active:scale-90 transition-all shadow-2xl bg-white/5"
-               >
-                  <div className="w-full h-full bg-white rounded-full flex items-center justify-center">
-                    <div className="w-[90%] h-[90%] border-2 border-black/5 rounded-full flex items-center justify-center">
-                      <i className="fas fa-camera text-slate-900 text-3xl"></i>
+                 <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Home <i className="fas fa-chevron-right mx-1 text-[8px]"></i></span>
+                      <span className="text-[10px] font-black text-teal-600 uppercase tracking-widest">{folderName}</span>
                     </div>
+                    <h2 className="text-sm font-black text-slate-900 dark:text-white uppercase mt-1">
+                      {isSelectMode ? `${selectedIds.size} Selected` : `Documents (${capturedPages.length})`}
+                    </h2>
+                 </div>
+              </div>
+              <div className="flex items-center gap-4">
+                 <button 
+                  onClick={() => { setIsSelectMode(!isSelectMode); setSelectedIds(new Set()); }}
+                  className={`text-lg transition-colors ${isSelectMode ? 'text-teal-500' : 'text-slate-400'}`}
+                 >
+                   <i className="fas fa-check-double"></i>
+                 </button>
+                 <button className="text-slate-400 text-lg"><i className="fas fa-ellipsis-v"></i></button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* GALLERY VIEW (High Fidelity Screenshot 8 Style) */}
+      {uiStep === 'gallery' && (
+        <div className="flex-1 overflow-y-auto p-5 bg-[#f0f4f7] dark:bg-slate-950 no-scrollbar">
+          <div className="grid grid-cols-3 gap-5">
+             {capturedPages.map((p, i) => (
+               <div key={p.id} className="flex flex-col animate-in zoom-in duration-300">
+                  <div 
+                    onClick={() => isSelectMode ? toggleSelect(p.id) : (setPreviewPage(p), setUiStep('preview'))}
+                    className={`relative aspect-[3/4] bg-white dark:bg-slate-900 rounded-2xl overflow-hidden shadow-md border-2 transition-all ${selectedIds.has(p.id) ? 'border-teal-500 ring-4 ring-teal-500/10' : 'border-transparent'}`}
+                  >
+                     <img src={p.processed} className="w-full h-full object-cover" alt="" />
+                     
+                     {/* Blue Checkmark Badge */}
+                     <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${selectedIds.has(p.id) ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className="w-12 h-12 bg-teal-500 rounded-full flex items-center justify-center text-white text-xl shadow-xl ring-4 ring-white">
+                           <i className="fas fa-check"></i>
+                        </div>
+                     </div>
+
+                     {/* Overflow Menu Icon */}
+                     <button className="absolute top-2 right-2 w-7 h-7 bg-black/20 backdrop-blur-md rounded-full flex items-center justify-center text-white text-[10px]">
+                        <i className="fas fa-ellipsis-h"></i>
+                     </button>
+
+                     {/* Document Index Badge */}
+                     <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-md text-teal-600 text-[8px] font-black px-1.5 py-0.5 rounded-md border border-slate-100 flex items-center gap-1 shadow-sm">
+                        <span className="opacity-60">1</span>
+                        <i className="fas fa-file-pdf"></i>
+                     </div>
                   </div>
-               </button>
-               
-               <button 
-                onClick={() => capturedPages.length > 0 && setUiStep('gallery')} 
-                disabled={capturedPages.length === 0} 
-                className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center transition-all ${capturedPages.length > 0 ? 'bg-teal-600 text-white shadow-xl active:scale-90' : 'bg-white/5 text-slate-700 pointer-events-none'}`}
-               >
-                 <span className="text-lg font-black">{capturedPages.length}</span>
-                 <span className="text-[7px] font-black uppercase tracking-widest">Done</span>
-               </button>
-            </div>
+                  
+                  {/* METADATA SECTION (Renameable) */}
+                  <div className="pt-2 px-1">
+                    <div className="flex items-center justify-between mb-0.5">
+                      {editingId === p.id ? (
+                        <input 
+                          autoFocus
+                          defaultValue={p.name}
+                          onBlur={(e) => updateDocName(p.id, e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && updateDocName(p.id, (e.target as any).value)}
+                          className="text-[10px] font-black text-teal-600 bg-teal-50 rounded px-1 outline-none w-full"
+                        />
+                      ) : (
+                        <span 
+                          onClick={(e) => { e.stopPropagation(); setEditingId(p.id); }}
+                          className="text-[10px] font-black text-slate-700 dark:text-slate-200 uppercase truncate max-w-[60px] cursor-text"
+                        >
+                          {p.name}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">{p.date}</span>
+                  </div>
+               </div>
+             ))}
+             
+             {/* ADD NEW BUTTON */}
+             {!isSelectMode && (
+                <button onClick={() => setUiStep('camera')} className="aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 bg-white/20 flex flex-col items-center justify-center text-slate-400 hover:text-teal-500 transition-all active:scale-95">
+                   <i className="fas fa-camera text-2xl mb-2"></i>
+                   <span className="text-[8px] font-black uppercase tracking-widest">Add Page</span>
+                </button>
+             )}
           </div>
         </div>
       )}
 
-      {/* Crop UI Step */}
-      {uiStep === 'crop' && currentCapture && (
-        <div className="flex-1 flex flex-col bg-slate-950 animate-in slide-in-from-right duration-300">
-           <div className="p-4 pt-8 flex justify-between items-center bg-black/50 border-b border-white/5">
-              <button onClick={() => setUiStep('camera')} className="flex items-center gap-2 text-slate-400 font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded-xl bg-white/5">
-                <i className="fas fa-arrow-left"></i> Retake
-              </button>
-              <h2 className="text-white font-black text-xs uppercase tracking-[0.4em]">Detect Edges</h2>
-              <button onClick={applyCrop} className="bg-teal-600 text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg">
-                Next <i className="fas fa-arrow-right ml-1"></i>
-              </button>
-           </div>
-           <div className="flex-1 relative p-8 flex items-center justify-center touch-none" ref={cropContainerRef} onMouseMove={handlePointMove} onTouchMove={handlePointMove}>
-              <img src={currentCapture} className="max-w-full max-h-full object-contain shadow-2xl rounded-xl pointer-events-none opacity-80" />
-              <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                 <polygon points={cropPoints.map(p => `${p.x}%,${p.y}%`).join(' ')} className="fill-teal-500/20 stroke-teal-500 stroke-2" />
-              </svg>
-              {cropPoints.map((p, i) => (
-                <div key={i} className="absolute w-12 h-12 -ml-6 -mt-6 rounded-full flex items-center justify-center touch-none transition-transform" style={{ left: `${p.x}%`, top: `${p.y}%` }} onMouseDown={() => setDraggingIdx(i)} onTouchStart={() => setDraggingIdx(i)} onMouseUp={() => setDraggingIdx(null)} onTouchEnd={() => setDraggingIdx(null)}>
-                  <div className={`w-6 h-6 bg-white rounded-full border-4 border-teal-500 shadow-xl ${draggingIdx === i ? 'scale-150 bg-teal-500' : ''}`}></div>
-                </div>
-              ))}
-           </div>
-           <div className="p-10 text-center bg-black/60 border-t border-white/5">
-              <p className="text-[10px] font-black uppercase tracking-[0.5em] text-teal-400">Drag points to document corners</p>
-           </div>
+      {/* SELECTION FOOTER (Screenshot 1 Style) */}
+      {uiStep === 'gallery' && isSelectMode && (
+        <div className="bg-white dark:bg-slate-900 p-8 pb-14 border-t border-slate-100 dark:border-slate-800 flex gap-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50 animate-in slide-in-from-bottom duration-300">
+           <button 
+             onClick={deleteSelected} 
+             disabled={selectedIds.size === 0} 
+             className="flex-1 bg-[#ffeef0] dark:bg-rose-950/30 text-rose-500 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest disabled:opacity-30 border border-rose-100 dark:border-rose-900 active:scale-95 transition-all"
+           >
+             DELETE ({selectedIds.size})
+           </button>
+           <button 
+             onClick={() => { setIsSelectMode(false); setSelectedIds(new Set()); }} 
+             className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-400 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest active:scale-95 transition-all"
+           >
+             CANCEL
+           </button>
         </div>
       )}
 
-      {/* Edit UI Step */}
-      {uiStep === 'edit' && currentCapture && (
-        <div className="flex-1 flex flex-col bg-slate-950 animate-in slide-in-from-bottom duration-300">
-           <div className="p-4 pt-8 flex justify-between items-center bg-black/50 border-b border-white/5 shadow-2xl">
-              <button onClick={() => setUiStep('crop')} className="flex items-center gap-2 text-slate-400 font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded-xl bg-white/5">
-                <i className="fas fa-arrow-left"></i> Crop
-              </button>
-              <h2 className="text-white font-black text-xs uppercase tracking-[0.4em]">Enhance</h2>
-              <button onClick={acceptEnhancedPage} className="bg-teal-600 text-white px-8 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-2xl">
-                Accept <i className="fas fa-check ml-1"></i>
-              </button>
-           </div>
-           <div className="flex-1 p-8 flex items-center justify-center overflow-hidden">
-              <img src={currentCapture} className={`max-w-full max-h-full object-contain transition-all duration-300 shadow-2xl rounded-xl border border-white/10 ${currentFilter === 'document' ? 'contrast-[1.25] grayscale brightness-110' : currentFilter === 'bw' ? 'grayscale contrast-[2.5]' : currentFilter === 'grayscale' ? 'grayscale' : ''}`} />
-           </div>
-           <div className="bg-black/90 p-6 flex gap-4 overflow-x-auto no-scrollbar border-t border-white/5 pb-14">
-              {[
-                { id: 'none', label: 'ORIGINAL', icon: 'fa-image' },
-                { id: 'document', label: 'MAGIC B&W', icon: 'fa-wand-magic-sparkles' },
-                { id: 'bw', label: 'SHARP B&W', icon: 'fa-circle-half-stroke' },
-                { id: 'grayscale', label: 'GRAY', icon: 'fa-ghost' },
-              ].map(f => (
-                <button key={f.id} onClick={() => setCurrentFilter(f.id as any)} className={`flex flex-col items-center gap-3 p-5 min-w-[100px] rounded-3xl transition-all border-2 ${currentFilter === f.id ? 'bg-teal-600 border-teal-500 text-black shadow-2xl scale-105' : 'bg-white/5 border-white/5 text-slate-500'}`}>
-                  <i className={`fas ${f.icon} text-xl`}></i>
-                  <span className="text-[9px] font-black uppercase tracking-tighter">{f.label}</span>
-                </button>
-              ))}
-           </div>
-        </div>
-      )}
-
-      {/* Gallery / Finalize Step */}
-      {uiStep === 'gallery' && (
-        <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950 animate-in fade-in duration-300">
-           <div className="p-4 pt-10 flex flex-col bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex justify-between items-center mb-4 px-2">
-                <button onClick={() => setUiStep('camera')} className="text-slate-500 text-xl"><i className="fas fa-arrow-left"></i></button>
-                <div className="flex-1 px-4 text-center">
-                   {isRenaming ? (
-                     <input 
-                       autoFocus 
-                       value={fileName} 
-                       onChange={e => setFileName(e.target.value)}
-                       onBlur={() => setIsRenaming(false)}
-                       onKeyDown={e => e.key === 'Enter' && setIsRenaming(false)}
-                       className="w-full bg-slate-100 dark:bg-slate-800 p-2 rounded-xl font-black text-sm text-center outline-none border-2 border-teal-500 dark:text-white" 
-                     />
-                   ) : (
-                     <h2 onClick={() => setIsRenaming(true)} className="text-slate-900 dark:text-white font-black text-sm uppercase truncate max-w-[200px] mx-auto flex items-center justify-center gap-2">
-                       {fileName} <i className="fas fa-pen text-[10px] text-teal-500 opacity-40"></i>
-                     </h2>
-                   )}
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{capturedPages.length} Documents</p>
-                </div>
-                <button onClick={() => setIsSelectMode(!isSelectMode)} className={`text-xl transition-colors ${isSelectMode ? 'text-teal-500' : 'text-slate-400'}`}><i className="fas fa-check-double"></i></button>
-              </div>
-           </div>
-
-           <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-5 overflow-y-auto p-6 no-scrollbar">
-              {capturedPages.map((p, i) => (
-                <div key={p.id} onClick={() => isSelectMode && toggleSelect(p.id)} className={`relative aspect-[3/4] rounded-[2rem] overflow-hidden border-4 transition-all ${selectedIds.has(p.id) ? 'border-teal-500 scale-95 shadow-inner' : 'border-white dark:border-slate-900 bg-white dark:bg-slate-900 shadow-xl'}`}>
-                   <img src={p.processed} className="w-full h-full object-cover" />
-                   <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-md text-white text-[9px] font-black px-2.5 py-1 rounded-lg">#{i+1}</div>
-                   {isSelectMode && (
-                     <div className={`absolute top-4 right-4 w-7 h-7 rounded-full flex items-center justify-center border-2 transition-all ${selectedIds.has(p.id) ? 'bg-teal-500 border-teal-500 text-white' : 'bg-white/20 border-white text-transparent'}`}>
-                       <i className="fas fa-check text-xs"></i>
-                     </div>
-                   )}
-                </div>
-              ))}
-           </div>
-
-           <div className="bg-white dark:bg-slate-900 p-8 pb-14 border-t border-slate-100 dark:border-slate-800 flex gap-4 shadow-2xl">
-              {isSelectMode ? (
-                <>
-                  <button onClick={deleteSelected} disabled={selectedIds.size === 0} className="flex-1 bg-rose-100 text-rose-600 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest disabled:opacity-30">Delete ({selectedIds.size})</button>
-                  <button onClick={() => { setIsSelectMode(false); setSelectedIds(new Set()); }} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-500 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest">Cancel</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => setUiStep('camera')} className="w-16 h-16 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-[2rem] flex items-center justify-center text-2xl"><i className="fas fa-plus"></i></button>
-                  <button onClick={() => setShowShareModal(true)} className="flex-1 bg-teal-600 text-white py-5 rounded-[2rem] font-black text-lg shadow-2xl active:scale-95 transition-all">
-                    SHARE OPTIONS
-                  </button>
-                </>
-              )}
-           </div>
-
-           {showShareModal && (
-             <div className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-md animate-in fade-in flex items-end">
-                <div className="w-full bg-white dark:bg-slate-900 rounded-t-[3rem] p-10 pb-16 animate-in slide-in-from-bottom duration-500 max-w-xl mx-auto shadow-2xl">
-                   <div className="flex justify-between items-center mb-10">
-                      <h3 className="text-2xl font-black uppercase tracking-tighter">Share Options</h3>
-                      <button onClick={() => setShowShareModal(false)} className="w-12 h-12 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-full flex items-center justify-center"><i className="fas fa-times"></i></button>
-                   </div>
-                   <div className="space-y-8">
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Export Format</label>
-                        <div className="flex bg-slate-100 dark:bg-slate-800/50 p-2 rounded-2xl">
-                           <button onClick={() => setExportFormat('PDF')} className={`flex-1 py-4 rounded-xl font-black text-sm transition-all ${exportFormat === 'PDF' ? 'bg-white dark:bg-slate-700 text-teal-600 shadow-xl' : 'text-slate-500'}`}>PDF</button>
-                           <button onClick={() => setExportFormat('JPG')} className={`flex-1 py-4 rounded-xl font-black text-sm transition-all ${exportFormat === 'JPG' ? 'bg-white dark:bg-slate-700 text-teal-600 shadow-xl' : 'text-slate-500'}`}>JPG</button>
-                        </div>
-                      </div>
-                      <div className="flex gap-4">
-                         <button onClick={() => setShowShareModal(false)} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-500 py-6 rounded-[2rem] font-black text-sm uppercase">Cancel</button>
-                         <button onClick={performExport} className="flex-1 bg-teal-600 text-white py-6 rounded-[2rem] font-black text-sm uppercase shadow-2xl active:scale-95 transition-transform">Process & Share</button>
-                      </div>
-                   </div>
-                </div>
-             </div>
-           )}
-        </div>
-      )}
-
-      {/* Idle / Landing Step */}
-      {uiStep === 'idle' && state.status !== 'success' && (
-        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-950 h-full">
-           <div className="w-28 h-28 bg-teal-500/10 text-teal-500 rounded-[2.5rem] flex items-center justify-center text-5xl mb-10 border border-teal-500/20 shadow-2xl">
-             <i className="fas fa-camera"></i>
-           </div>
-           <h1 className="text-4xl font-black text-white mb-4 uppercase tracking-tighter">Pro Scanner</h1>
-           <p className="text-slate-500 mb-12 font-medium text-sm max-w-xs mx-auto uppercase tracking-[0.3em]">Privacy-First • Local Export</p>
+      {/* FLOATING ACTION BUTTONS (Screenshot 8/9 Style) */}
+      {uiStep === 'gallery' && !isSelectMode && (
+        <div className="fixed bottom-12 right-6 flex flex-col gap-4 z-50">
+           <button 
+            onClick={() => setShowShareModal(true)} 
+            disabled={capturedPages.length === 0}
+            className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl shadow-2xl transition-all active:scale-90 ${capturedPages.length > 0 ? 'bg-white text-teal-600' : 'bg-slate-200 text-slate-400 opacity-50'}`}
+           >
+             <i className="fas fa-share-nodes"></i>
+           </button>
            <button 
             onClick={startCamera} 
-            className="bg-teal-600 text-white px-14 py-6 rounded-[2.5rem] font-black text-xl shadow-2xl shadow-teal-600/20 active:scale-95 transition-all"
-          >
-            Start Scanning
-          </button>
+            className="w-20 h-20 bg-teal-500 rounded-3xl flex items-center justify-center text-white text-3xl shadow-2xl shadow-teal-500/40 active:scale-90 transition-all border-4 border-white"
+           >
+             <i className="fas fa-camera"></i>
+           </button>
         </div>
       )}
 
-      {/* Success View */}
+      {/* SHARE MODAL (Screenshot 2 Fidelity) */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm animate-in fade-in flex items-end">
+           <div className="w-full bg-white dark:bg-slate-900 rounded-t-[3rem] p-8 pb-16 animate-in slide-in-from-bottom duration-500 max-w-2xl mx-auto shadow-2xl flex flex-col gap-8">
+              
+              {/* Header Info */}
+              <div className="flex items-center gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
+                 <div className="w-16 h-16 bg-blue-500 text-white rounded-2xl flex items-center justify-center text-3xl shadow-lg">
+                    <i className="fas fa-share"></i>
+                 </div>
+                 <div className="flex-1">
+                    <h3 className="text-xl font-black text-slate-800 dark:text-white truncate">vc and other {capturedPages.length - 1} documents</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{capturedPages.length} Document | {capturedPages.length} Files</p>
+                 </div>
+              </div>
+
+              {/* Toggles List (Exactly like Screenshot 2) */}
+              <div className="space-y-4">
+                 <div className="flex items-center justify-between py-2">
+                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Share as PDF</span>
+                    <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                       <button onClick={() => setExportFormat('PDF')} className={`px-6 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${exportFormat === 'PDF' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-md' : 'text-slate-400'}`}>PDF</button>
+                       <button onClick={() => setExportFormat('JPG')} className={`px-6 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${exportFormat === 'JPG' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-md' : 'text-slate-400'}`}>IMAGE(JPG)</button>
+                    </div>
+                 </div>
+
+                 {[
+                   { label: 'Enable Password Protection', value: enablePassword, setter: setEnablePassword },
+                   { label: 'Searchable PDF with OCR Text', value: enableOCR, setter: setEnableOCR },
+                   { label: 'Save Separately (ZIP)', value: saveSeparately, setter: setSaveSeparately },
+                 ].map((item, idx) => (
+                   <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-50 dark:border-slate-800/50">
+                      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{item.label}</span>
+                      <button 
+                        onClick={() => item.setter(!item.value)} 
+                        className={`w-12 h-6 rounded-full transition-all relative ${item.value ? 'bg-blue-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                      >
+                         <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${item.value ? 'left-7' : 'left-1'}`}></div>
+                      </button>
+                   </div>
+                 ))}
+
+                 <div className="flex items-center justify-between py-3">
+                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300">PDF Page Size: <span className="text-blue-500 ml-2">{pageSize}</span></span>
+                    <i className="fas fa-chevron-right text-slate-300 text-xs"></i>
+                 </div>
+
+                 <button className="text-blue-500 text-[11px] font-black uppercase tracking-widest underline underline-offset-4 decoration-2">Compress Now</button>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-4 mt-4">
+                 <button onClick={() => setShowShareModal(false)} className="flex-1 py-5 border-2 border-slate-100 dark:border-slate-800 rounded-xl font-black text-slate-400 uppercase tracking-widest text-xs">CANCEL</button>
+                 <button onClick={handleExport} className="flex-1 py-5 bg-[#1d3345] text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all">SHARE</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* CAMERA VIEW */}
+      {uiStep === 'camera' && (
+        <div className="flex-1 flex flex-col h-full bg-black relative animate-in fade-in duration-300">
+          <div className="absolute top-10 left-0 right-0 px-6 flex justify-between items-center z-20">
+            <button onClick={() => setUiStep('gallery')} className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-full text-white"><i className="fas fa-times"></i></button>
+            <div className="bg-white/10 backdrop-blur-md p-1 rounded-2xl border border-white/5">
+               <button onClick={() => setIsAutoMode(true)} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${isAutoMode ? 'bg-teal-500 text-black' : 'text-white'}`}>Auto</button>
+               <button onClick={() => setIsAutoMode(false)} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${!isAutoMode ? 'bg-teal-500 text-black' : 'text-white'}`}>Manual</button>
+            </div>
+            <button onClick={() => setIsFlashOn(!isFlashOn)} className={`w-12 h-12 rounded-full backdrop-blur-md transition-all ${isFlashOn ? 'bg-orange-500 text-white' : 'bg-white/10 text-white'}`}><i className="fas fa-bolt"></i></button>
+          </div>
+          <video ref={videoRef} autoPlay playsInline muted className="flex-1 object-cover" onLoadedMetadata={() => videoRef.current?.play()}></video>
+          
+          <div className="bg-black/90 p-10 pb-16 flex items-center justify-between px-12 border-t border-white/5">
+             <div className="w-16 h-16 rounded-2xl border-2 border-white/10 overflow-hidden" onClick={() => setUiStep('gallery')}>
+                {capturedPages.length > 0 ? <img src={capturedPages[capturedPages.length-1].processed} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-white/5"></div>}
+             </div>
+             <button onClick={capturePhoto} className="w-24 h-24 rounded-full border-[6px] border-white/20 p-2 active:scale-95 transition-all">
+                <div className="w-full h-full bg-white rounded-full"></div>
+             </button>
+             <button onClick={() => setUiStep('gallery')} className="w-16 h-16 flex flex-col items-center justify-center text-white bg-white/10 rounded-2xl">
+                <span className="text-xl font-black">{capturedPages.length}</span>
+                <span className="text-[8px] font-black uppercase">Docs</span>
+             </button>
+          </div>
+        </div>
+      )}
+
+      {/* IDLE LANDING */}
+      {uiStep === 'idle' && state.status !== 'success' && (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-950">
+           <div className="w-24 h-24 bg-teal-500/10 text-teal-500 rounded-[2rem] flex items-center justify-center text-4xl mb-8 border border-teal-500/20 shadow-2xl"><i className="fas fa-camera"></i></div>
+           <h1 className="text-4xl font-black text-white mb-4 tracking-tighter uppercase">Pro Scanner</h1>
+           <p className="text-slate-500 mb-12 font-medium text-xs tracking-widest uppercase">Privacy-First • Local Renaming</p>
+           <button onClick={startCamera} className="bg-teal-600 text-white px-14 py-6 rounded-[2.5rem] font-black text-xl shadow-2xl active:scale-95 transition-all">OPEN CAMERA</button>
+           <button onClick={() => setUiStep('gallery')} className="mt-8 text-slate-600 font-black text-[10px] uppercase tracking-[0.3em]">View Saved Documents ({capturedPages.length})</button>
+        </div>
+      )}
+
+      {/* SUCCESS VIEW */}
       {state.status === 'success' && (
         <div className="fixed inset-0 z-[99999] bg-slate-950 flex flex-col items-center justify-center p-12 text-center animate-in zoom-in duration-500">
-           <div className="w-28 h-28 bg-teal-500 text-white text-5xl rounded-[3rem] flex items-center justify-center mb-12 shadow-2xl border-4 border-white/10">
-             <i className="fas fa-check-double"></i>
-           </div>
-           <h2 className="text-5xl font-black text-white mb-6 uppercase tracking-tighter">SUCCESS!</h2>
-           <p className="text-slate-500 mb-14 font-black text-xs uppercase tracking-widest opacity-80">Output Ready for download</p>
+           <div className="w-28 h-28 bg-teal-500 text-white text-5xl rounded-[3rem] flex items-center justify-center mb-12 shadow-2xl border-4 border-white/10"><i className="fas fa-check-double"></i></div>
+           <h2 className="text-5xl font-black text-white mb-6 uppercase tracking-tighter">PDF READY!</h2>
+           <p className="text-slate-500 mb-14 font-black text-xs uppercase tracking-widest opacity-80">Export successful</p>
            <div className="flex flex-col gap-5 w-full max-w-sm">
-              <a href={state.resultUrl} download={state.resultFileName} className="bg-orange-500 text-white py-7 rounded-[2.5rem] font-black text-2xl shadow-2xl active:scale-95 transition-transform flex items-center justify-center gap-5">
+              <a href={state.resultUrl} download={state.resultFileName} className="bg-orange-500 text-white py-7 rounded-[2.5rem] font-black text-2xl shadow-2xl active:scale-95 transition-transform flex items-center justify-center gap-5 uppercase">
                 <i className="fas fa-file-download"></i> DOWNLOAD
               </a>
-              <button 
-                onClick={() => { setCapturedPages([]); setState({status:'idle', progress: 0}); setUiStep('idle'); }} 
-                className="text-slate-500 font-black text-[11px] uppercase tracking-[0.4em] py-6 hover:text-teal-500 transition-colors"
-              >
-                START NEW SESSION
-              </button>
+              <button onClick={() => { setState({status:'idle', progress: 0}); setUiStep('gallery'); }} className="text-slate-500 font-black text-[11px] uppercase tracking-[0.4em] py-6 hover:text-teal-500 transition-colors">BACK TO FOLDER</button>
            </div>
         </div>
       )}
 
-      {/* Loading / Processing View */}
+      {/* LOADING OVERLAY */}
       {(state.status === 'processing' || state.status === 'loading') && (
-        <div className="fixed inset-0 z-[30000] bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center p-12 text-center text-white">
+        <div className="fixed inset-0 z-[30000] bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center p-12 text-center text-white animate-in fade-in">
            <div className="relative w-28 h-28 mb-12">
               <div className="absolute inset-0 border-[10px] border-white/5 rounded-full"></div>
               <div className="absolute inset-0 border-[10px] border-teal-500 border-t-transparent rounded-full animate-spin"></div>
               <div className="absolute inset-0 flex items-center justify-center text-teal-500 text-xl font-black">{state.progress}%</div>
            </div>
            <h2 className="text-3xl font-black mb-4 uppercase tracking-tighter">Working...</h2>
-           <p className="text-white/40 font-black uppercase text-[10px] tracking-[0.6em]">{state.message || 'Optimizing Frames'}</p>
+           <p className="text-white/40 font-black uppercase text-[10px] tracking-[0.6em]">{state.message}</p>
         </div>
       )}
-      
+
       <style>{`
-        @keyframes scan {
-          0%, 100% { top: 0%; opacity: 0; }
-          50% { top: 100%; opacity: 1; }
-        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        @keyframes scan { 0%, 100% { top: 0%; opacity: 0; } 50% { top: 100%; opacity: 1; } }
       `}</style>
     </div>
   );
